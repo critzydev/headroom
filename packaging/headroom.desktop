@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Headroom
+GenericName=Audio mixer
+Comment=Mix your mic, game, music and chat
+Exec=@BINDIR@/headroom --show
+Icon=headroom
+Terminal=false
+Categories=AudioVideo;Audio;Mixer;
+Keywords=audio;mixer;microphone;mic;wave;elgato;discord;
+StartupNotify=false

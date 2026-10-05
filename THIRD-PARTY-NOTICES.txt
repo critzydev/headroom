@@ -1,0 +1,160 @@
+THIRD-PARTY NOTICES
+===================
+
+Headroom itself is licensed under the GNU Affero General Public License,
+version 3 (LICENSE). It uses the software, fonts, icons and test data below.
+Each is under its own licence. Where the licence text is kept in this
+repository, the file is named; otherwise the licence comes with the source that
+the build fetches.
+
+
+JUCE
+----
+https://juce.com   Version 9.0.3, fetched by CMake (cmake/HeadroomJuce.cmake).
+
+The JUCE modules are dual-licensed: the AGPL-3.0 and a commercial licence.
+Headroom uses them under the AGPL-3.0, which is why Headroom is AGPL-3.0 too.
+
+JUCE bundles some third-party code, each under its own licence (the texts are in
+the JUCE source that CMake fetches):
+
+  - VST3 SDK, Steinberg Media Technologies GmbH: MIT
+  - LV2, lilv, serd, sord and sratom, David Robillard and others: ISC
+  - zlib: zlib licence
+  - libpng: PNG Reference Library License, version 2
+  - libjpeg, the Independent JPEG Group: IJG licence
+  - libwebp, Google Inc.: BSD-3-Clause
+
+
+RNNoise
+-------
+https://github.com/xiph/rnnoise   Version 0.2, fetched by CMake
+(cmake/HeadroomRnnoise.cmake) and compiled into Headroom. Noise removal "Light".
+BSD-3-Clause. The licence, from the RNNoise source:
+
+    Copyright (c) 2007-2017, 2024 Jean-Marc Valin
+    Copyright (c) 2023 Amazon
+    Copyright (c) 2017, Mozilla
+    Copyright (c) 2005-2017, Xiph.Org Foundation
+    Copyright (c) 2003-2004, Mark Borgerding
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions
+    are met:
+
+    - Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+
+    - Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in the
+    documentation and/or other materials provided with the distribution.
+
+    - Neither the name of the Xiph.Org Foundation nor the names of its
+    contributors may be used to endorse or promote products derived from
+    this software without specific prior written permission.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+    ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+    A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION
+    OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+    SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+    LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+DeepFilterNet
+-------------
+https://github.com/Rikorose/DeepFilterNet   Version 0.5.6, fetched by CMake
+(cmake/HeadroomDfn.cmake). Copyright (c) 2021 Hendrik Schröter.
+Licensed under either the MIT licence or the Apache License 2.0, at your option.
+
+Headroom links its libDF library (together with the small C interface in
+dfn-shim/) and ships its two noise-removal networks, DeepFilterNet3 and
+DeepFilterNet3 low-latency, as files next to the program (the "Fast" and "Best"
+noise removal). The networks are downloaded at build time, not stored in this
+repository. The build copies the two licence files next to them
+(LICENSE-DeepFilterNet-MIT.txt and LICENSE-DeepFilterNet-APACHE.txt in the
+models folder), and the AppImage and tarball carry them along.
+
+libDF runs the networks with tract (https://github.com/sonos/tract, MIT or
+Apache-2.0). It and the other Rust crates the build pulls in (dfn-shim/Cargo.lock
+lists them, with exact versions) are under their own licences.
+
+The interface code in dfn-shim/ is Headroom's own, under the AGPL-3.0.
+
+
+Inter and JetBrains Mono (fonts)
+--------------------------------
+Embedded in the program. SIL Open Font License, version 1.1.
+
+  - Inter: Copyright (c) 2016 The Inter Project Authors,
+    https://github.com/rsms/inter
+    Licence: resources/fonts/OFL-Inter.txt
+  - JetBrains Mono: Copyright 2020 The JetBrains Mono Project Authors,
+    https://github.com/JetBrains/JetBrainsMono
+    Licence: resources/fonts/OFL-JetBrainsMono.txt
+
+
+Lucide (icons)
+--------------
+https://lucide.dev   The interface icons in resources/icons/ui/ are Lucide
+icons, embedded in the program. Lucide is under the ISC licence; icons that come
+from the Feather project are under the MIT licence.
+Licence: resources/icons/ui/LICENSE-lucide.txt
+
+The Headroom icon (resources/icons/headroom.svg and headroom.png) is Headroom's
+own, under the AGPL-3.0.
+
+
+Speech clips used by the tests (tests/data/speech/)
+---------------------------------------------------
+Four short speech clips for the noise-removal tests (tests/unit/SpeechCutTests.cpp).
+They are not part of the program and are not shipped with it.
+
+They are taken from the CSTR VCTK Corpus (version 0.92):
+
+    Yamagishi, Veaux and MacDonald, "CSTR VCTK Corpus: English Multi-speaker
+    Corpus for CSTR Voice Cloning Toolkit (version 0.92)".
+    University of Edinburgh, The Centre for Speech Technology Research (CSTR).
+    https://doi.org/10.7488/ds/2645
+
+Licence: Creative Commons Attribution 4.0 International (CC BY 4.0),
+https://creativecommons.org/licenses/by/4.0/
+
+Changes: the original FLAC files (wav48_silence_trimmed/<speaker>/
+<speaker>_<utterance>_mic1.flac) were decoded to 16 bit PCM WAV. Nothing else
+was changed: no resampling, no gain, no trimming. The clips are mono, 48 kHz,
+9.5 s in all:
+
+    file           speaker  voice  accent                     length
+    p305_419.wav   p305     F      American (Philadelphia)    2.18 s
+    p361_385.wav   p361     F      American (New Jersey)      2.24 s
+    p334_190.wav   p334     M      American (Chicago)         2.48 s
+    p304_267.wav   p304     M      Northern Irish (Belfast)   2.56 s
+
+The tests mix these clips with noises that the tests generate themselves.
+
+
+Protocols
+---------
+Headroom's USB control of the Elgato Wave:3 and (experimental) Wave XLR is
+Headroom's own code, written from protocol descriptions that others published,
+among them Kailas Mahavarkar's analysis of Elgato's Wave Link software and the
+open-source projects rikkichy/openwave and emaspa/openxlr. Thanks to them.
+
+
+System libraries
+----------------
+Headroom links PipeWire, FreeType, Fontconfig and the X11 libraries dynamically.
+They come from the computer it runs on and are not bundled. The AppImage files
+contain the AppImage runtime (https://github.com/AppImage/type2-runtime, MIT).
+
+
+Trademarks
+----------
+Elgato, Wave and Wave Link are trademarks of their owner. Headroom is not
+affiliated with Elgato.

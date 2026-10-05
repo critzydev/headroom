@@ -1,0 +1,41 @@
+name: Bug report
+description: Something doesn't work the way it should? Thanks for telling me.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Headroom version
+      description: Shown in Settings > About.
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Linux distribution
+      placeholder: "Bazzite, Fedora 44, Ubuntu 24.04, ..."
+    validations:
+      required: true
+  - type: input
+    id: mic
+    attributes:
+      label: Microphone
+      description: The model, for example Elgato Wave:3, or "none" if it has nothing to do with a mic.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: |
+        The end of the log file is very helpful: `~/.local/state/headroom/headroom.log`
+        (Settings > About > "Open log folder" opens it). Paste the last lines here.
+      render: text

@@ -1,0 +1,427 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    # Build and test on the real target: Fedora 44 (GCC 15, PipeWire 1.6) in a container. The release package is built by the
+    # `appimage` job below (older glibc), then installed and tested on Fedora 44 and Ubuntu 24.04 by `appimage-test`.
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 60
+
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 600M
+      CCACHE_COMPRESS: "1"
+      CCACHE_BASEDIR: ${{ github.workspace }}
+
+    steps:
+      - name: Install dependencies
+        run: |
+          dnf -y install \
+            gcc-c++ cmake ninja-build git pkgconf-pkg-config rust cargo \
+            freetype-devel fontconfig-devel \
+            libX11-devel libXext-devel libXcomposite-devel libXcursor-devel libXinerama-devel \
+            libXrandr-devel libXrender-devel libXi-devel \
+            ladspa-devel pipewire-devel \
+            ccache xorg-x11-server-Xvfb xorg-x11-xauth \
+            pipewire wireplumber pipewire-utils dbus-daemon python3 python3-pip \
+            procps-ng psmisc util-linux shadow-utils \
+            tar gzip zstd
+
+      - uses: actions/checkout@v4
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-fedora44-${{ github.sha }}
+          restore-keys: |
+            ccache-fedora44-
+
+      # DeepFilterNet (Fast and Best noise removal): libDF and our C shim are built by cargo into one static library.
+      # The crates and the compiled dependencies are cached; the key changes with the checked-in Cargo.lock.
+      - name: Restore cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            build/dfn-cargo/target
+          key: cargo-fedora44-${{ hashFiles('dfn-shim/Cargo.lock', 'dfn-shim/Cargo.toml.in', 'dfn-shim/src/**') }}
+          restore-keys: |
+            cargo-fedora44-
+
+      - name: Rust toolchain
+        run: |
+          rustc --version
+          cargo --version
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: |
+          cmake --build build --target headroom headroom_tests -j "$(nproc)" -- -k 0
+          ccache --show-stats
+
+      - name: Unit tests
+        run: ./build/headroom_tests
+
+      - name: Screenshots (NullBackend, virtual display)
+        working-directory: build
+        run: xvfb-run -a ./headroom --screenshot shots
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: build/shots/
+          if-no-files-found: error
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: headroom-linux-x86_64
+          path: build/headroom
+          if-no-files-found: error
+
+      # ------------------------------------------------------------------------------------------
+      # End-to-end test against a private PipeWire + WirePlumber: fake Wave:3, real headroom
+      # under Xvfb with HEADROOM_TEST_NO_FX=1. Prints PASS/FAIL per check, exits non-zero on any failure.
+      # ------------------------------------------------------------------------------------------
+      - name: Integration test (PipeWire)
+        run: timeout 900 tests/integration/run.sh build/headroom it-logs
+
+      - name: Upload integration logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-logs
+          path: it-logs/
+          if-no-files-found: ignore
+
+  # ------------------------------------------------------------------------------------------------
+  # The release build: Headroom built in an OLDER-glibc image so that the one binary runs on Bazzite (Fedora 44)
+  # and on every other current distribution, packed as an AppImage (plus the tarball, from the same binary). Debian 12:
+  # glibc 2.36, GCC 12, PipeWire 0.3.65 headers, and every package this needs is in its archive. libpipewire, ALSA, X11,
+  # freetype, fontconfig and libstdc++ are NOT bundled: they come from the host (libpipewire has to match the daemon).
+  # ------------------------------------------------------------------------------------------------
+  appimage:
+    runs-on: ubuntu-latest
+    container: debian:12
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash     # the image's sh is dash
+
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 600M
+      CCACHE_COMPRESS: "1"
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      # Pinned release tools (checksums below). Bump them together with the sha256 values.
+      APPIMAGETOOL_URL: https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+      APPIMAGETOOL_SHA256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+      APPIMAGE_RUNTIME_URL: https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64
+      APPIMAGE_RUNTIME_SHA256: 2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
+      RUSTUP_URL: https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-unknown-linux-gnu/rustup-init
+      RUSTUP_SHA256: 20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c
+      RUST_TOOLCHAIN: "1.98.1"
+
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build git pkg-config ca-certificates curl xz-utils file binutils \
+            libfreetype-dev libfontconfig-dev \
+            libx11-dev libxext-dev libxcomposite-dev libxcursor-dev libxinerama-dev libxrandr-dev libxrender-dev libxi-dev \
+            ladspa-sdk libpipewire-0.3-dev ccache squashfs-tools desktop-file-utils shellcheck \
+            tar gzip zstd
+
+      - uses: actions/checkout@v4
+
+      # Restored first and saved even when a later step fails, so a failure after the long build does not cost the build again.
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: ccache-debian12-${{ github.sha }}
+          restore-keys: |
+            ccache-debian12-
+
+      - name: Restore cargo cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            build/dfn-cargo/target
+          key: cargo-debian12-${{ hashFiles('dfn-shim/Cargo.lock', 'dfn-shim/Cargo.toml.in', 'dfn-shim/src/**') }}
+          restore-keys: |
+            cargo-debian12-
+
+      - name: Rust toolchain (pinned)
+        run: |
+          curl -sSfL -o /tmp/rustup-init "$RUSTUP_URL"
+          echo "$RUSTUP_SHA256  /tmp/rustup-init" | sha256sum -c -
+          chmod +x /tmp/rustup-init
+          /tmp/rustup-init -y --no-modify-path --profile minimal --default-toolchain "$RUST_TOOLCHAIN"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Packaging tools (pinned, checksummed)
+        run: |
+          mkdir -p "$HOME/tools"
+          curl -sSfL -o "$HOME/tools/appimagetool" "$APPIMAGETOOL_URL"
+          echo "$APPIMAGETOOL_SHA256  $HOME/tools/appimagetool" | sha256sum -c -
+          curl -sSfL -o "$HOME/tools/runtime-x86_64" "$APPIMAGE_RUNTIME_URL"
+          echo "$APPIMAGE_RUNTIME_SHA256  $HOME/tools/runtime-x86_64" | sha256sum -c -
+          chmod +x "$HOME/tools/appimagetool"
+
+      - name: Toolchain versions
+        run: |
+          gcc --version | sed -n 1p
+          ldd --version | sed -n 1p
+          cmake --version | sed -n 1p
+          rustc --version
+          pkg-config --modversion libpipewire-0.3
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: |
+          cmake --build build --target headroom headroom_tests -j "$(nproc)" -- -k 0
+          ccache --show-stats
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ccache-debian12-${{ github.sha }}
+
+      - name: Save cargo cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            build/dfn-cargo/target
+          key: cargo-debian12-${{ hashFiles('dfn-shim/Cargo.lock', 'dfn-shim/Cargo.toml.in', 'dfn-shim/src/**') }}
+
+      - name: Unit tests
+        run: ./build/headroom_tests
+
+      # The floor this binary asks of the computer it runs on. These limits are what "runs on current distributions" means;
+      # a build that needs more fails here instead of failing for a person.
+      - name: What the binary needs from the host
+        run: |
+          echo "--- needed libraries"
+          readelf -d build/headroom | grep NEEDED
+          max_of() { objdump -T build/headroom | grep -o "$1_[0-9.]*" | sort -uV | tail -1; }
+          glibc="$(max_of GLIBC)"; glibcxx="$(max_of GLIBCXX)"; cxxabi="$(max_of CXXABI)"
+          echo "--- newest symbol versions: $glibc $glibcxx $cxxabi"
+          [ "$(printf '%s\n' "$glibc" GLIBC_2.36 | sort -V | tail -1)" = "GLIBC_2.36" ] || { echo "needs a newer glibc than 2.36"; exit 1; }
+          [ "$(printf '%s\n' "$glibcxx" GLIBCXX_3.4.30 | sort -V | tail -1)" = "GLIBCXX_3.4.30" ] || { echo "needs a newer libstdc++ than GCC 12's"; exit 1; }
+          # Never linked in (they come from the host, and only when needed): ALSA and anything GL.
+          if readelf -d build/headroom | grep NEEDED | grep -Eq 'libasound|libGL|libEGL'; then echo "unexpected library"; exit 1; fi
+
+      - name: Version
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            base="$(grep -oP 'project\(Headroom VERSION \K[0-9.]+' CMakeLists.txt)"
+            version="${base}-dev.${GITHUB_SHA::7}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check packaging scripts
+        run: |
+          shellcheck -S error packaging/install.sh packaging/uninstall.sh packaging/make-tarball.sh packaging/make-appimage.sh \
+            tests/integration/run.sh tests/integration/install-test.sh tests/integration/appimage-test.sh
+          bash -n packaging/install.sh
+          bash -n packaging/uninstall.sh
+
+      - name: Package the AppImage
+        run: |
+          export APPIMAGETOOL="$HOME/tools/appimagetool" APPIMAGE_RUNTIME_FILE="$HOME/tools/runtime-x86_64"
+          packaging/make-appimage.sh build/headroom "${{ steps.version.outputs.version }}" dist
+          ls -l dist
+
+      - name: Package the tarball (same binary)
+        run: |
+          packaging/make-tarball.sh build/headroom "${{ steps.version.outputs.version }}" dist
+          ls -l dist
+          tar tzvf dist/headroom-*-x86_64.tar.gz | sed -n 1,30p
+
+      - name: The AppImage runs (extract and run, no FUSE here)
+        run: |
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          appimage="$(ls dist/Headroom-*-x86_64.AppImage)"
+          "$appimage" --version || true
+          "$appimage" --appimage-extract >/dev/null
+          find squashfs-root -maxdepth 3 | sort | sed -n 1,40p
+          test -f squashfs-root/usr/bin/models/DeepFilterNet3_onnx.tar.gz
+          test -f squashfs-root/usr/bin/models/DeepFilterNet3_ll_onnx.tar.gz
+          desktop-file-validate squashfs-root/headroom.desktop
+
+      - name: Upload the AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: headroom-appimage
+          path: dist/*.AppImage
+          if-no-files-found: error
+
+      - name: Upload the tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: headroom-tarball
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------------------------------------
+  # The package, on the two systems it is for: Bazzite's base (Fedora 44) and Ubuntu 24.04. Each installs the AppImage into a
+  # scratch HOME (unattended, stub systemctl), updates it, uninstalls it and does it all twice; the tarball's install.sh gets
+  # the same treatment. On Fedora the installed AppImage's own binary then runs the PipeWire integration test.
+  # No FUSE in a container: APPIMAGE_EXTRACT_AND_RUN=1.
+  # ------------------------------------------------------------------------------------------------
+  appimage-test:
+    needs: appimage
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [ "fedora:44", "ubuntu:24.04" ]
+
+    env:
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+      DEBIAN_FRONTEND: noninteractive
+
+    steps:
+      - name: Install what a desktop has (Fedora)
+        if: startsWith(matrix.image, 'fedora')
+        run: |
+          dnf -y install \
+            libX11 libXext libXcomposite libXcursor libXinerama libXrandr libXrender libXi freetype fontconfig \
+            pipewire pipewire-utils wireplumber dbus-daemon xorg-x11-server-Xvfb xorg-x11-xauth \
+            util-linux shadow-utils tar gzip desktop-file-utils python3 procps-ng psmisc
+
+      - name: Install what a desktop has (Ubuntu)
+        if: startsWith(matrix.image, 'ubuntu')
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            libx11-6 libxext6 libxcomposite1 libxcursor1 libxinerama1 libxrandr2 libxrender1 libxi6 libfreetype6 libfontconfig1 \
+            libpipewire-0.3-0t64 util-linux passwd tar gzip desktop-file-utils ca-certificates
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: headroom-appimage
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: headroom-tarball
+          path: dist
+
+      - name: The AppImage starts here
+        run: |
+          chmod +x dist/*.AppImage
+          ./dist/Headroom-*-x86_64.AppImage --version
+          . /etc/os-release && echo "running on $PRETTY_NAME"
+
+      - name: AppImage installer test (stub systemctl, scratch HOME)
+        run: tests/integration/appimage-test.sh "$(ls dist/Headroom-*-x86_64.AppImage)"
+
+      - name: Tarball installer test (stub systemctl, scratch HOME)
+        run: tests/integration/install-test.sh "$(ls dist/headroom-*-x86_64.tar.gz)"
+
+      # The installed copy is the one that runs: install it into a scratch home (no service started), unpack it and give its own
+      # binary and models to the same end-to-end test the Fedora build gets.
+      - name: Integration test (PipeWire) on the installed AppImage
+        if: startsWith(matrix.image, 'fedora')
+        run: |
+          mkdir -p /tmp/hrstub /tmp/hrhome
+          printf '#!/bin/sh\ncase "$*" in *list-unit-files*) echo "pipewire.service enabled enabled";; esac\nexit 0\n' > /tmp/hrstub/systemctl
+          chmod +x /tmp/hrstub/systemctl
+          appimage="$(ls "$PWD"/dist/Headroom-*-x86_64.AppImage)"
+          HOME=/tmp/hrhome PATH="/tmp/hrstub:$PATH" "$appimage" --setup-unattended --source "$appimage" --no-start
+          ( cd /tmp/hrhome/.local/opt/headroom && ./Headroom.AppImage --appimage-extract >/dev/null )
+          ls /tmp/hrhome/.local/opt/headroom/squashfs-root/usr/bin/models
+          timeout 900 tests/integration/run.sh /tmp/hrhome/.local/opt/headroom/squashfs-root/AppRun it-logs-appimage
+
+      - name: Upload integration logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-logs-appimage-${{ strategy.job-index }}
+          path: it-logs-appimage/
+          if-no-files-found: ignore
+
+  release:
+    # Only for version tags: attach the AppImage and the tarball to a GitHub release, once everything has passed. The AppImage
+    # goes up twice: with its version in the name, and as Headroom-x86_64.AppImage, so that
+    # https://github.com/critzydev/headroom/releases/latest/download/Headroom-x86_64.AppImage always points at the newest one.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, appimage, appimage-test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: headroom-appimage
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: headroom-tarball
+          path: dist
+
+      - name: Create or update the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The stable-named copy of the versioned AppImage (see the comment on this job).
+          versioned=(dist/Headroom-*-x86_64.AppImage)
+          [ "${#versioned[@]}" -eq 1 ] && [ -f "${versioned[0]}" ] || { echo "expected exactly one versioned AppImage in dist" >&2; exit 1; }
+          cp "${versioned[0]}" dist/Headroom-x86_64.AppImage
+          ls -l dist
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/*.AppImage dist/*.tar.gz --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$GITHUB_REF_NAME" dist/*.AppImage dist/*.tar.gz --repo "$GITHUB_REPOSITORY" \
+              --title "Headroom ${GITHUB_REF_NAME#v}" --generate-notes
+          fi

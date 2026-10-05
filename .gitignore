@@ -1,0 +1,29 @@
+# Build output
+build/
+build-*/
+cmake-build-*/
+out/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+
+# Visual Studio / IDEs
+.vs/
+.idea/
+*.user
+*.suo
+*.vcxproj.filters
+.vscode/*
+!.vscode/settings.json
+
+# Screenshots and scratch output
+screenshots/
+shots/
+
+# Python
+__pycache__/
+*.pyc
+
+# OS junk
+.DS_Store
+Thumbs.db

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Download and info
+    url: https://critz.dev/headroom
+    about: Downloads, and how Headroom works.

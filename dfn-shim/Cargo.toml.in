@@ -1,0 +1,30 @@
+# Manifest template. CMake (cmake/HeadroomDfn.cmake) fills in the @...@ paths and writes the result next to a copy of
+# Cargo.lock in the build directory, so DeepFilterNet can come from FetchContent or from a local checkout.
+[package]
+name = "headroom_dfn"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0-or-later"
+description = "Panic-safe C interface to DeepFilterNet (libDF, tract runtime) for Headroom"
+
+[lib]
+name = "headroom_dfn"
+path = "@HEADROOM_DFN_SHIM_DIR@/src/lib.rs"
+crate-type = ["staticlib", "rlib"]
+
+# Only the tract runtime: the models are files that ship next to the program, nothing is embedded.
+[dependencies]
+deep_filter = { path = "@HEADROOM_DFN_LIBDF_DIR@", default-features = false, features = ["tract"] }
+ndarray = "0.15"
+
+[[example]]
+name = "probe"
+path = "@HEADROOM_DFN_SHIM_DIR@/examples/probe.rs"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+debug = false
+panic = "unwind"    # catch_unwind in lib.rs turns an internal panic into an error instead of an abort
